@@ -86,6 +86,10 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EnhancedInput | Action", meta = (AllowPrivateAccess = "true"))
 		TObjectPtr<UInputAction> IA_DropWeapon;
 
+	//按下R武器换弹
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EnhancedInput | Action", meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputAction> IA_Reload;
+
 
 	//游戏内鼠标灵敏度
 	UPROPERTY(EditAnywhere, Category = "Input")
@@ -107,6 +111,21 @@ private:
 
 public:
 
+	//垂直后坐力
+	float NewVerticalRecoilAmount = 0.f;
+	float OldVerticalRecoilAmount = 0.f;
+	float VerticalRecoilAmount = 0.f;
+	//每次射击的X坐标
+	float RecoilXCoordPerShoot = 0.f;
+	//水平后座力
+	float NewHorizontalRecoilAmount = 0.f;
+	float OldHorizontalRecoilAmount = 0.f;
+	float HorizontalRecoilAmount = 0.f;
+	//每次射击的y坐标
+	float RecoilYCoordPerShoot = 0.f;
+
+	void ResetRecoil();
+
 protected:
 
 private:
@@ -126,6 +145,14 @@ private:
 	//要被忽略的检测对象
 	UPROPERTY()
 		TArray<AActor* > IgnoreArray;
+
+	UPROPERTY(EditAnywhere, Category = "Health")
+		float CurrentHealth = 100.f;
+
+	UPROPERTY(EditAnywhere, Category = "Health")
+		float MaxHealth = 100.f;
+
+
 private:
 
 	//出生时自带设定的武器
@@ -162,7 +189,10 @@ protected:
 
 
 	//按G丢弃武器
-	void DropWeapon();
+	void InputDropWeapon();
+
+	//按R武器换弹
+	void InputReload();
 	///
 	
 	void CollisionTimerFinished();
@@ -189,6 +219,14 @@ public:
 	UFUNCTION(Server, Reliable)
 		void ServerFireRifleWeapon(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
 
+	//服务端换弹
+	UFUNCTION(Server, Reliable)
+		void ServerReloadPrimary();
+
+	//服务端停止射击
+	UFUNCTION(Server, Reliable)
+		void ServerStopFire();
+
 	//多播播放身体开火动画蒙太奇
 	UFUNCTION(NetMulticast, Reliable)
 		void MultiShooting();
@@ -206,10 +244,21 @@ public:
 		UFUNCTION(Client, Reliable)
 			void ClientFire();
 
-	//客户端更新UI
+	//客户端更新AmmoUI
 		UFUNCTION(Client, Reliable)
 			void ClientUpdateAmmoUI(int32 ClipCurrentAmmo, int32 GunCurrentAmmo);
 
+	//客户端更新healthUI
+		UFUNCTION(Client, Reliable)
+			void ClientUpdateHealthUI(float NewHealth,float _MaxHealth);
+
+		//客户端后坐力实现
+		UFUNCTION(Client, Reliable)
+			void ClientRecoil();
+
+		//客户端后坐力实现
+		UFUNCTION(Client, Reliable)
+			void ClientReload();
 
 	//角色装备武器,装备武器之前记得用EquipWeapon()关闭碰撞
 	void EquipPrimaryWeapon(AWeaponBaseServer* Weapon);
@@ -218,14 +267,39 @@ public:
 	//返回主武器
 	AWeaponBaseServer* GetServerPrimaryWeapon();
 
+	FTimerHandle AutoFireTimerHandle;
+
+
+	void AutoFire();
+	//步枪的射击相关
 	void StartPrimaryFire();
-
 	void StopPrimaryFire();
-
 	//步枪射线检测
 	void RifleLineTrace(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
 
+	//是否正在开火
+	UPROPERTY(Replicated)
+		bool bIsFiring = false;
+	//是否在换弹
+	UPROPERTY(Replicated)
+		bool bIsReloading = false;
+	//狙击枪射击相关
+
+	//手枪射击相关
+
+	//应用伤害到玩家
+	void DamagePlayer(UPhysicalMaterial * PhysicalMaterial, AActor* DamagedActor, float BaseDamage, FVector const& HitFromDirection, FHitResult const& HitInfo, AController* EventInstigator, AActor* DamageCauser);
+
+	//OnTakePointDamage应用伤害函数的回调
+	UFUNCTION()
+		void OnHit(AActor* DamagedActor, float Damage, class AController* InstigatedBy, FVector HitLocation, class UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const class UDamageType* DamageType, AActor* DamageCauser);
+
 };
+
+
+
+
+
 
 
 

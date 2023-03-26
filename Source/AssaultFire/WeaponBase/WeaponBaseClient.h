@@ -16,13 +16,16 @@ public:
 	USkeletalMeshComponent *WeaponMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) 
-		UAnimMontage* ClientArmsFireAnimMontage;
+		UAnimMontage* ClientArmsFireAnimMontage;//¿ª»ðÃÉÌ«Ææ
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+		UAnimMontage* ClientArmsReloadAnimMontage;//»»µ¯ÃÉÌ«Ææ
 
 	UPROPERTY(EditAnywhere)
 		USoundBase* FireSound;
 
 	UPROPERTY(EditAnywhere)
-		UParticleSystem* MuzzleFlash;
+		UParticleSystem* MuzzleFlash;//Ç¹¿Ú»ð¹âÌØÐ§
 
 	UPROPERTY(EditAnywhere)
 		TSubclassOf<UCameraShakeBase> CameraShakeClass;

@@ -9,7 +9,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Net/UnrealNetwork.h"
-
+#include "PhysicalMaterials/PhysicalMaterial.h"
 // Sets default values
 AFPSBaseCharacter::AFPSBaseCharacter()
 {
@@ -37,13 +37,17 @@ AFPSBaseCharacter::AFPSBaseCharacter()
 void AFPSBaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	//DOREPLIFETIME_CONDITION(AFPSBaseCharacter, ServerPrimaryWeapon, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(AFPSBaseCharacter, bIsFiring, COND_None);
+	DOREPLIFETIME_CONDITION(AFPSBaseCharacter, bIsReloading, COND_None);
+
 }
 
 
 void AFPSBaseCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	//绑定应用伤害函数的回调
+	OnTakePointDamage.AddDynamic(this, &AFPSBaseCharacter::OnHit);
 	//开始的时候带枪
 	StartWithKindOfWeapon(bIfSpawnWeapon, WeaponType);
 
@@ -205,8 +209,19 @@ void AFPSBaseCharacter::ServerFireRifleWeapon_Implementation(FVector CameraLocat
 
 	}
 
-
+	bIsFiring = true;
 	RifleLineTrace(CameraLocation, CameraRotation, bIsMoving);
+}
+
+void AFPSBaseCharacter::ServerReloadPrimary_Implementation()
+{
+	//客户端手臂播放动画，服务器多播身体动画，数据更新,UI更改
+	ClientReload();
+}
+
+void AFPSBaseCharacter::ServerStopFire_Implementation()
+{
+	bIsFiring = false;
 }
 
 void AFPSBaseCharacter::MultiShooting_Implementation()
@@ -282,13 +297,44 @@ AWeaponBaseClient* AFPSBaseCharacter::GetCurrentClientWeapon()
 
 }
 
+void AFPSBaseCharacter::ResetRecoil()
+{
+	 NewVerticalRecoilAmount = 0.f;
+	 OldVerticalRecoilAmount = 0.f;
+	 VerticalRecoilAmount = 0.f;
+	 RecoilXCoordPerShoot = 0.f;
+	 NewHorizontalRecoilAmount = 0.f;
+		 OldHorizontalRecoilAmount = 0.f;
+		 HorizontalRecoilAmount = 0.f;
+		 RecoilYCoordPerShoot = 0.f;
+}
+
 
 //交给武器类去处理
-void AFPSBaseCharacter::DropWeapon()
+void AFPSBaseCharacter::InputDropWeapon()
 {
 	if(ServerPrimaryWeapon)
 	{
 		ServerPrimaryWeapon->DropWeapon();
+	}
+}
+
+void AFPSBaseCharacter::InputReload()
+{
+	if(!bIsReloading)
+	{
+		if(!bIsFiring)
+		{
+			switch (CurrentWeaponType)
+			{
+			case EWeaponType::AK47:
+			{
+				ServerReloadPrimary();
+				break;
+			}
+			}
+		}
+		
 	}
 }
 
@@ -301,6 +347,16 @@ void AFPSBaseCharacter::ClientUpdateAmmoUI_Implementation(int32 ClipCurrentAmmo,
 	}
 }
 
+
+void AFPSBaseCharacter::ClientUpdateHealthUI_Implementation(float NewHealth,float _MaxHealth)
+{
+	if (FPSPlayerController)
+	{
+		FPSPlayerController->UpdateHealthUI(NewHealth, _MaxHealth);
+	}
+}
+
+
 void AFPSBaseCharacter::MultiSpawnBulletDecal_Implementation(FVector Location, FRotator Rotation)
 {
 	if(ServerPrimaryWeapon->BulletDecalMaterial)
@@ -312,6 +368,61 @@ void AFPSBaseCharacter::MultiSpawnBulletDecal_Implementation(FVector Location, F
 			Decal->SetFadeScreenSize(0.001);
 		}
 	}
+}
+
+
+void AFPSBaseCharacter::ClientRecoil_Implementation()
+{
+	UCurveFloat* VerticalRecoilCurve = nullptr;
+	UCurveFloat* HorizontalRecoilCurve = nullptr;
+	if(ServerPrimaryWeapon)
+	{
+		//获取武器的后坐力表
+		VerticalRecoilCurve = ServerPrimaryWeapon->VerticalRecoilCurve;
+		HorizontalRecoilCurve = ServerPrimaryWeapon->HorizontalRecoilCurve;
+	}
+	//表的横坐标加0.1
+	RecoilXCoordPerShoot += 0.1;
+	RecoilYCoordPerShoot += 0.1;
+
+	if(VerticalRecoilCurve)
+	{
+		//按表的横坐标获取对应的float值并应用到新的垂直后坐力数值上
+		NewVerticalRecoilAmount = VerticalRecoilCurve->GetFloatValue(RecoilXCoordPerShoot);
+	}
+
+	if (HorizontalRecoilCurve)
+	{
+		//按表的横坐标获取对应的float值并应用到新的水平后坐力数值上
+		NewHorizontalRecoilAmount = HorizontalRecoilCurve->GetFloatValue(RecoilYCoordPerShoot);
+	}
+	
+	//
+	VerticalRecoilAmount = NewVerticalRecoilAmount - OldVerticalRecoilAmount;
+	HorizontalRecoilAmount = NewHorizontalRecoilAmount - OldHorizontalRecoilAmount;
+
+	if(FPSPlayerController)
+	{
+		FRotator ControllerRotator = FPSPlayerController->GetControlRotation();
+		FPSPlayerController->SetControlRotation(FRotator(ControllerRotator.Pitch + VerticalRecoilAmount, ControllerRotator.Yaw +	HorizontalRecoilAmount,ControllerRotator.Roll));
+
+	}
+
+	OldVerticalRecoilAmount = NewVerticalRecoilAmount;
+	OldHorizontalRecoilAmount = NewHorizontalRecoilAmount;
+
+}
+
+void AFPSBaseCharacter::ClientReload_Implementation()
+{
+	//手臂播放动画蒙太奇
+	AWeaponBaseClient* CurrentClientWeapon = GetCurrentClientWeapon();
+	if(CurrentClientWeapon)
+	{
+		UAnimMontage* ClientArmsReloadingMontage = GetCurrentClientWeapon()->ClientArmsReloadAnimMontage;
+		FPSArmsAnimBP->Montage_Play(ClientArmsReloadingMontage);
+	}
+	
 }
 
 void AFPSBaseCharacter::EquipPrimaryWeapon(AWeaponBaseServer* WeaponBaseServer)
@@ -355,6 +466,9 @@ void AFPSBaseCharacter::ClientFire_Implementation()
 			FPSArmsAnimBP->Montage_Play(ClientArmsFireMontage);
 		}
 
+		//客户端后坐力
+		ClientRecoil();
+
 		//播放射击声音，播放枪口闪光
 		WeaponBaseClient->DisplayWeaponEffect();
 
@@ -371,27 +485,74 @@ void AFPSBaseCharacter::ClientFire_Implementation()
 	
 }
 
-void AFPSBaseCharacter::StartPrimaryFire()
+void AFPSBaseCharacter::AutoFire()
 {
 	//判断子弹数量剩余
-	if(ServerPrimaryWeapon->ClipCurrentAmmo > 0)
+	if (ServerPrimaryWeapon->ClipCurrentAmmo > 0)
 	{
 		//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
-		ServerFireRifleWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), false);
+		if (UKismetMathLibrary::VSize(GetVelocity()) > 0.1f)
+		{
+			ServerFireRifleWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), true);
+		}
+		else
+		{
+			ServerFireRifleWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), false);
+		}
 		//客户端（枪体播放动画done，手臂播放动画done，播放射击声音done，屏幕抖动done，后坐力，枪口闪光粒子效果done，）
 		//创建十字准星done 播放十字准星done 开火时准星扩散 在beginplay添加，由控制器类在蓝图实现done
 		//创建子弹UI更新子弹UI 
 		ClientFire();
 
-	
+		//客户端后坐力
+		//ClientRecoil();
+	}
+	else
+	{
+		StopPrimaryFire();
+	}
+}
+
+void AFPSBaseCharacter::StartPrimaryFire()
+{
+	//判断子弹数量剩余
+	if(ServerPrimaryWeapon->ClipCurrentAmmo > 0)
+	{
+		
+		//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
+		if(UKismetMathLibrary::VSize(GetVelocity()) > 0.1f)
+		{
+			ServerFireRifleWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), true);
+		}
+		else
+		{
+			ServerFireRifleWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), false);
+		}
+		//客户端（枪体播放动画done，手臂播放动画done，播放射击声音done，屏幕抖动done，后坐力，枪口闪光粒子效果done，）
+		//创建十字准星done 播放十字准星done 开火时准星扩散 在beginplay添加，由控制器类在蓝图实现done
+		//创建子弹UI更新子弹UI 
+		ClientFire();
 		//半自动全自动处理
+		//开启计时器 每隔固定时间重新射击
+		if(ServerPrimaryWeapon->IsAutomatic)
+		{
+			GetWorldTimerManager().SetTimer(AutoFireTimerHandle, this, &AFPSBaseCharacter::AutoFire, ServerPrimaryWeapon->AutoFireRate, true);
+		}
+	
+		
 	}
 	
 }
 
 void AFPSBaseCharacter::StopPrimaryFire()
 {
+	//更改isFiring变量
+	ServerStopFire();
+	//关闭计时器，每隔固定时间重新计时
+	GetWorldTimerManager().ClearTimer(AutoFireTimerHandle);
 
+	//重置后坐力相关变量
+	ResetRecoil();
 }
 
 void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving)
@@ -408,7 +569,14 @@ void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRo
 		//是否移动导致不同的location检测
 		if (bIsMoving)
 		{
+			//xyz全部加随机偏移
+			FVector Vector = CameraLocation + CameraForwardVector * ServerPrimaryWeapon->BulletDistance;
+			//跑打偏移范围
+			float RandomX = UKismetMathLibrary::RandomFloatInRange(-ServerPrimaryWeapon->MovingFireRandomRange, ServerPrimaryWeapon->MovingFireRandomRange);
+			float RandomY = UKismetMathLibrary::RandomFloatInRange(-ServerPrimaryWeapon->MovingFireRandomRange, ServerPrimaryWeapon->MovingFireRandomRange);
+			float RandomZ = UKismetMathLibrary::RandomFloatInRange(-ServerPrimaryWeapon->MovingFireRandomRange, ServerPrimaryWeapon->MovingFireRandomRange);
 
+			EndLocation = FVector(Vector.X + RandomX, Vector.Y + RandomY, Vector.Z + RandomZ);
 		}
 		else
 		{
@@ -424,8 +592,12 @@ void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRo
 		UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("Hit Actor Name : %s"), *HitResult.GetActor()->GetName()));
 		if(AFPSBaseCharacter * HittedCharacter = Cast<AFPSBaseCharacter>(HitResult.GetActor()))
 		{
+			if (ServerPrimaryWeapon)
+			{
 			//打到玩家，应用伤害
-				
+			//这里可以做伤害加成,可以做个monster基类,也可以不在这里做伤害加成，而是在应用伤害的类里做伤害放大
+			DamagePlayer(HitResult.PhysMaterial.Get() ,HitResult.GetActor(), ServerPrimaryWeapon->BaseDamage, CameraLocation, HitResult, GetController(), this);
+			}
 		}
 		else
 		{
@@ -435,6 +607,70 @@ void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRo
 			MultiSpawnBulletDecal(HitResult.Location, XRotator );
 		}
 	}
+}
+
+void AFPSBaseCharacter::DamagePlayer(UPhysicalMaterial* PhysicalMaterial ,AActor* DamagedActor, float BaseDamage, FVector const& HitFromDirection, FHitResult const& HitInfo, AController* EventInstigator, AActor* DamageCauser)
+{
+	float FinalDamage = BaseDamage;
+	//身体四个位置受到不同伤害
+	if(ServerPrimaryWeapon)
+	{
+		switch (PhysicalMaterial->SurfaceType)
+		{
+		case EPhysicalSurface::SurfaceType1:
+		{
+			//head
+			FinalDamage = BaseDamage* ServerPrimaryWeapon->HeadDamageRate;
+			break;
+		}
+		case EPhysicalSurface::SurfaceType2:
+		{
+			//Body
+			FinalDamage = BaseDamage* ServerPrimaryWeapon->BodyDamageRate;
+			break;
+		}
+		case EPhysicalSurface::SurfaceType3:
+		{
+			//Arm
+			FinalDamage = BaseDamage* ServerPrimaryWeapon->ArmDamageRate;
+			break;
+		}
+		case EPhysicalSurface::SurfaceType4:
+		{
+			//Leg
+			FinalDamage = BaseDamage* ServerPrimaryWeapon->LegDamageRate;
+			break;
+		}
+		default:
+			FinalDamage = BaseDamage;
+			break;
+
+		}
+	}
+	
+
+	UGameplayStatics::ApplyPointDamage(DamagedActor, FinalDamage, HitFromDirection, HitInfo, EventInstigator, DamageCauser, UDamageType::StaticClass());
+
+	//OnTakePointDamage
+}
+
+void AFPSBaseCharacter::OnHit(AActor* DamagedActor, float Damage, AController* InstigatedBy, FVector HitLocation,
+	UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const UDamageType* DamageType,
+	AActor* DamageCauser)
+{
+	CurrentHealth -= Damage;
+	//1. 客户端RPC 2.调用客户端PlayerController的一个方法(蓝图实现) 3. 实现PlayerUI血量减少的接口
+	if(CurrentHealth>0)
+	{
+		//客户端调用函数更新healthUI
+		ClientUpdateHealthUI(CurrentHealth,MaxHealth);
+	}
+	else
+	{
+		//死亡逻辑
+
+	}
+	
 }
 
 void AFPSBaseCharacter::StartWithKindOfWeapon(bool _bIfSpawnWeapon,EWeaponType _WeaponType)
@@ -533,7 +769,10 @@ void AFPSBaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 		EnhancedInputComponent->BindAction(IA_ShiftReleased, ETriggerEvent::Triggered, this, &AFPSBaseCharacter::NormalSpeedWalk);
 
 		//按G丢弃武器
-		EnhancedInputComponent->BindAction(IA_DropWeapon, ETriggerEvent::Triggered, this, &AFPSBaseCharacter::DropWeapon);
+		EnhancedInputComponent->BindAction(IA_DropWeapon, ETriggerEvent::Triggered, this, &AFPSBaseCharacter::InputDropWeapon);
+
+		//按R武器换弹
+		EnhancedInputComponent->BindAction(IA_Reload, ETriggerEvent::Triggered, this, &AFPSBaseCharacter::InputReload);
 
 	// 你可以通过更改"ETriggerEvent"枚举值，绑定到此处的任意触发器事件
 	//Input->BindAction(AimingInputAction, ETriggerEvent::Triggered, this, &AFPSBaseCharacter::SomeCallbackFunc);

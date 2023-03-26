@@ -93,8 +93,36 @@ public:
 	UPROPERTY(EditAnywhere)
 		UMaterialInterface* BulletDecalMaterial;
 
+	UPROPERTY(EditAnywhere, Category = "Damage")
+		float BaseDamage = 20.f;
 
+	//后面参照玩家血量进行属性同步，后期可以升级攻击倍率
+	UPROPERTY(EditAnywhere, Category = "Damage")
+		float HeadDamageRate = 2.f;
 
+	UPROPERTY(EditAnywhere, Category = "Damage")
+		float ArmDamageRate = 1.f;
+
+	UPROPERTY(EditAnywhere, Category = "Damage")
+		float LegDamageRate = 1.f;
+
+	UPROPERTY(EditAnywhere, Category = "Damage")
+		float BodyDamageRate = 1.f;
+
+	UPROPERTY(EditAnywhere, Category = "Weapon")
+		bool IsAutomatic = true;//是否为全自动武器
+
+	UPROPERTY(EditAnywhere, Category = "Weapon")
+		float AutoFireRate = 0.2;//自动射击频率
+
+	UPROPERTY(EditAnywhere, Category = "Weapon")
+		UCurveFloat* VerticalRecoilCurve;//枪械的垂直后坐力表
+
+	UPROPERTY(EditAnywhere, Category = "Weapon")
+		UCurveFloat* HorizontalRecoilCurve;//枪械的水平后坐力表
+
+	UPROPERTY(EditAnywhere, Category = "Weapon")
+		float MovingFireRandomRange = 300.f;//枪械的跑打随机后坐力偏移
 };
 
 

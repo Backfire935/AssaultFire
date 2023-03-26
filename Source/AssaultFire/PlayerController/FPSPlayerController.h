@@ -27,6 +27,7 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Player UI")
 	void UpdateAmmoUI(int32 ClipCurrentAmmo, int32 GunCurrentAmmo);
 
-
+	UFUNCTION(BlueprintImplementableEvent, Category = "Player UI")
+	void UpdateHealthUI(float NewHealth,float _MaxHealth);
 
 };
