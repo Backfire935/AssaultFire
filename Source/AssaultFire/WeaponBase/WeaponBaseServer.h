@@ -64,6 +64,8 @@ public:
 	UFUNCTION(NetMulticast,Unreliable)
 	void MultiShootingEffect();
 
+
+
 	void DisplayWeaponEffect();
 
 	void DropWeapon();
@@ -84,8 +86,11 @@ public:
 	UPROPERTY(EditAnywhere)
 		int32 MaxClipAmmo = 30; //弹夹容量
 
-	UPROPERTY(EditAnywhere)
-		UAnimMontage* ServerTPSBodysAnimMontage;//第三人称射击动画蒙太奇
+	UPROPERTY(EditAnywhere,Category= "Anim")
+		UAnimMontage* ServerTPSBodysShootAnimMontage;//第三人称射击动画蒙太奇
+
+	UPROPERTY(EditAnywhere, Category = "Anim")
+		UAnimMontage* ServerTPSBodysReloadAnimMontage;//第三人称换弹动画蒙太奇
 
 	UPROPERTY(EditAnywhere)
 		float BulletDistance = 1000.f;//攻击距离

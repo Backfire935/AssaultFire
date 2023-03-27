@@ -107,7 +107,6 @@ private:
 	UPROPERTY(EditAnywhere, meta = (AllowPrivateAccess = " true"))
 	EWeaponType CurrentWeaponType;
 
-	AWeaponBaseClient* GetCurrentClientWeapon();
 
 public:
 
@@ -231,6 +230,10 @@ public:
 	UFUNCTION(NetMulticast, Reliable)
 		void MultiShooting();
 
+	//多播换弹动画
+	UFUNCTION(NetMulticast, Reliable)
+		void MultiReloadAnimation();
+
 	//多播生成弹孔
 	UFUNCTION(NetMulticast, Reliable)
 		void MultiSpawnBulletDecal(FVector Location, FRotator Rotation);
@@ -266,6 +269,8 @@ public:
 
 	//返回主武器
 	AWeaponBaseServer* GetServerPrimaryWeapon();
+	AWeaponBaseClient* GetCurrentClientWeapon();
+	AWeaponBaseServer* GetCurrentServerWeapon();
 
 	FTimerHandle AutoFireTimerHandle;
 
@@ -283,6 +288,10 @@ public:
 	//是否在换弹
 	UPROPERTY(Replicated)
 		bool bIsReloading = false;
+
+	UFUNCTION()
+		void DelayPlayArmReloadCallBack();
+
 	//狙击枪射击相关
 
 	//手枪射击相关
@@ -295,6 +304,8 @@ public:
 		void OnHit(AActor* DamagedActor, float Damage, class AController* InstigatedBy, FVector HitLocation, class UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const class UDamageType* DamageType, AActor* DamageCauser);
 
 };
+
+
 
 
 

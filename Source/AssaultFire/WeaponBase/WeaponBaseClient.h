@@ -49,6 +49,8 @@ public:
 	UFUNCTION(BlueprintImplementableEvent,Category= "FPSAnimation")
 		void PlayShootAnimation();
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSAnimation")
+	void PlayReloadAnimation();
 
 	void DisplayWeaponEffect();
 

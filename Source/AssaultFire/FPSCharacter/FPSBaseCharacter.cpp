@@ -128,16 +128,20 @@ void AFPSBaseCharacter::Tick(float DeltaTime)
 
 void AFPSBaseCharacter::FirePressed(const FInputActionValue& InputValue)
 {
-	switch (CurrentWeaponType)
-	{
-		case EWeaponType::AK47 :
-			{
-				StartPrimaryFire();
-				break;
-			}
+
+	
+		switch (CurrentWeaponType)
+		{
+		case EWeaponType::AK47:
+		{
+			StartPrimaryFire();
+			break;
+		}
 		default:
 			break;
-	}
+		}
+	
+	
 }
 
 void AFPSBaseCharacter::FireReleased(const FInputActionValue& InputValue)
@@ -215,8 +219,36 @@ void AFPSBaseCharacter::ServerFireRifleWeapon_Implementation(FVector CameraLocat
 
 void AFPSBaseCharacter::ServerReloadPrimary_Implementation()
 {
-	//客户端手臂播放动画，服务器多播身体动画，数据更新,UI更改
-	ClientReload();
+	if(ServerPrimaryWeapon)
+	{
+		//子弹不够或者满的都不换
+		if(ServerPrimaryWeapon->ClipCurrentAmmo < ServerPrimaryWeapon->MaxClipAmmo && ServerPrimaryWeapon->GunCurrentAmmo > 0)
+		{
+			//客户端手臂播放动画，
+			ClientReload();
+			//服务器多播身体动画，
+			MultiReloadAnimation();
+
+			bIsReloading = true;
+
+			//数据更新,UI更改
+			if(ClientPrimaryWeapon)
+			{
+				FLatentActionInfo ActionInfo;
+				ActionInfo.CallbackTarget = this;
+				//在这里指定延迟后的回调函数
+				ActionInfo.ExecutionFunction = TEXT("DelayPlayArmReloadCallBack");
+				ActionInfo.UUID = FMath::Rand();
+				ActionInfo.Linkage = 0;
+				//C++中实现delay较为麻烦
+				UKismetSystemLibrary::Delay(this, ClientPrimaryWeapon->ClientArmsReloadAnimMontage->GetPlayLength(), ActionInfo);
+			}
+			
+		}
+	
+	}
+
+	
 }
 
 void AFPSBaseCharacter::ServerStopFire_Implementation()
@@ -228,11 +260,24 @@ void AFPSBaseCharacter::MultiShooting_Implementation()
 {
 	if(TPSBodysAnimBP)
 	{
-		if(ServerPrimaryWeapon && ServerPrimaryWeapon->ServerTPSBodysAnimMontage)
+		if(ServerPrimaryWeapon && ServerPrimaryWeapon->ServerTPSBodysShootAnimMontage)
 		{
-			TPSBodysAnimBP->Montage_Play(ServerPrimaryWeapon->ServerTPSBodysAnimMontage);
+			TPSBodysAnimBP->Montage_Play(ServerPrimaryWeapon->ServerTPSBodysShootAnimMontage);
 		}
 	}
+}
+
+void AFPSBaseCharacter::MultiReloadAnimation_Implementation()
+{
+	AWeaponBaseServer* CurrentServerWeapon = GetCurrentServerWeapon();
+	if (TPSBodysAnimBP)
+	{
+		if (CurrentServerWeapon && CurrentServerWeapon->ServerTPSBodysReloadAnimMontage)
+		{
+			TPSBodysAnimBP->Montage_Play(CurrentServerWeapon->ServerTPSBodysReloadAnimMontage);
+		}
+	}
+	
 }
 
 void AFPSBaseCharacter::ClientEquipFPArmsPrimary_Implementation()
@@ -278,7 +323,10 @@ void AFPSBaseCharacter::ClientEquipFPArmsPrimary_Implementation()
 	}
 }
 
-
+AWeaponBaseServer* AFPSBaseCharacter::GetServerPrimaryWeapon()
+{
+	return ServerPrimaryWeapon;
+}
 
 
 AWeaponBaseClient* AFPSBaseCharacter::GetCurrentClientWeapon()
@@ -295,6 +343,21 @@ AWeaponBaseClient* AFPSBaseCharacter::GetCurrentClientWeapon()
 			return nullptr;
 	}
 
+}
+
+AWeaponBaseServer* AFPSBaseCharacter::GetCurrentServerWeapon()
+{
+	switch (CurrentWeaponType)
+	{
+	case EWeaponType::AK47:
+	{
+		return ServerPrimaryWeapon;
+
+	}
+
+	default:
+		return nullptr;
+	}
 }
 
 void AFPSBaseCharacter::ResetRecoil()
@@ -421,6 +484,7 @@ void AFPSBaseCharacter::ClientReload_Implementation()
 	{
 		UAnimMontage* ClientArmsReloadingMontage = GetCurrentClientWeapon()->ClientArmsReloadAnimMontage;
 		FPSArmsAnimBP->Montage_Play(ClientArmsReloadingMontage);
+		CurrentClientWeapon->PlayReloadAnimation();
 	}
 	
 }
@@ -445,10 +509,7 @@ void AFPSBaseCharacter::EquipPrimaryWeapon(AWeaponBaseServer* WeaponBaseServer)
 }
 
 
-AWeaponBaseServer* AFPSBaseCharacter::GetServerPrimaryWeapon()
-{
-	return ServerPrimaryWeapon;
-}
+
 
 void AFPSBaseCharacter::ClientFire_Implementation()
 {
@@ -510,13 +571,14 @@ void AFPSBaseCharacter::AutoFire()
 	else
 	{
 		StopPrimaryFire();
+		ServerReloadPrimary();
 	}
 }
 
 void AFPSBaseCharacter::StartPrimaryFire()
 {
 	//判断子弹数量剩余
-	if(ServerPrimaryWeapon->ClipCurrentAmmo > 0)
+	if(ServerPrimaryWeapon->ClipCurrentAmmo > 0 && !bIsReloading)
 	{
 		
 		//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
@@ -540,6 +602,13 @@ void AFPSBaseCharacter::StartPrimaryFire()
 		}
 	
 		
+	}
+	else
+	{
+		if(!bIsReloading)
+		{
+			ServerReloadPrimary();
+		}
 	}
 	
 }
@@ -609,6 +678,35 @@ void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRo
 	}
 }
 
+void AFPSBaseCharacter::DelayPlayArmReloadCallBack()
+{
+	int32 _GunCurrentAmmo	=  ServerPrimaryWeapon->GunCurrentAmmo;//身上的子弹
+	int32 _ClipCurrentAmmo		=  ServerPrimaryWeapon->ClipCurrentAmmo;//弹夹还剩多少
+	int32 _MaxClipAmmo			=  ServerPrimaryWeapon->MaxClipAmmo;//弹夹容量
+
+	//是否装填全部子弹
+	if(_MaxClipAmmo - _ClipCurrentAmmo > _GunCurrentAmmo )//要装填的子弹>还剩下的子弹 说明身上的子弹不够填满弹夹了 此时全部子弹扔进去但还填不满弹夹
+	{
+		_ClipCurrentAmmo += _GunCurrentAmmo;
+		_GunCurrentAmmo -= _GunCurrentAmmo;
+	}
+	else//要装填的子弹<=还剩下的子弹 说明身上的子弹足够填满弹夹 此时把弹夹填满
+	{
+		//身上的子弹减掉消耗的部分
+		_GunCurrentAmmo -= _MaxClipAmmo - _ClipCurrentAmmo;
+		//弹夹填充要补充的子弹
+		_ClipCurrentAmmo = _MaxClipAmmo;
+	}
+
+	//变量设置回去
+	ServerPrimaryWeapon->GunCurrentAmmo = _GunCurrentAmmo;
+	ServerPrimaryWeapon->ClipCurrentAmmo = _ClipCurrentAmmo;
+	ServerPrimaryWeapon->MaxClipAmmo = _MaxClipAmmo;
+
+	ClientUpdateAmmoUI(_ClipCurrentAmmo,_GunCurrentAmmo);
+	bIsReloading = false;
+}
+
 void AFPSBaseCharacter::DamagePlayer(UPhysicalMaterial* PhysicalMaterial ,AActor* DamagedActor, float BaseDamage, FVector const& HitFromDirection, FHitResult const& HitInfo, AController* EventInstigator, AActor* DamageCauser)
 {
 	float FinalDamage = BaseDamage;
@@ -659,17 +757,19 @@ void AFPSBaseCharacter::OnHit(AActor* DamagedActor, float Damage, AController* I
 	AActor* DamageCauser)
 {
 	CurrentHealth -= Damage;
+	if (CurrentHealth <= 0) CurrentHealth = 0;
+	ClientUpdateHealthUI(CurrentHealth, MaxHealth);
 	//1. 客户端RPC 2.调用客户端PlayerController的一个方法(蓝图实现) 3. 实现PlayerUI血量减少的接口
-	if(CurrentHealth>0)
+	if(CurrentHealth==0)
 	{
 		//客户端调用函数更新healthUI
-		ClientUpdateHealthUI(CurrentHealth,MaxHealth);
-	}
-	else
-	{
 		//死亡逻辑
-
+	
 	}
+
+		
+
+	
 	
 }
 
