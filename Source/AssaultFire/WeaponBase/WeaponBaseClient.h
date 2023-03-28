@@ -29,6 +29,9 @@ public:
 
 	UPROPERTY(EditAnywhere)
 		TSubclassOf<UCameraShakeBase> CameraShakeClass;
+
+	UPROPERTY(EditAnywhere)
+		int FPArmsBlendPose = 0;
 	
 private:
 

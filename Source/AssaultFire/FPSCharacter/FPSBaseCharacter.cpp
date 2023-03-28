@@ -39,6 +39,8 @@ void AFPSBaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME_CONDITION(AFPSBaseCharacter, bIsFiring, COND_None);
 	DOREPLIFETIME_CONDITION(AFPSBaseCharacter, bIsReloading, COND_None);
+	DOREPLIFETIME_CONDITION(AFPSBaseCharacter, CurrentWeaponType, COND_None);
+	
 
 }
 
@@ -134,6 +136,16 @@ void AFPSBaseCharacter::FirePressed(const FInputActionValue& InputValue)
 		{
 		case EWeaponType::AK47:
 		{
+			 StartPrimaryFire();
+			break;
+		}
+		case EWeaponType::M4A1:
+		{
+			StartPrimaryFire();
+			break;
+		}
+		case EWeaponType::MP7:
+		{
 			StartPrimaryFire();
 			break;
 		}
@@ -153,6 +165,16 @@ void AFPSBaseCharacter::FireReleased(const FInputActionValue& InputValue)
 			StopPrimaryFire();
 			break;
 		}
+	case EWeaponType::M4A1:
+		{
+			StopPrimaryFire();
+			break;
+		}
+	case EWeaponType::MP7:
+	{
+		StopPrimaryFire();
+		break;
+	}
 		default:
 			break;
 	}
@@ -293,7 +315,7 @@ void AFPSBaseCharacter::ClientEquipFPArmsPrimary_Implementation()
 			FActorSpawnParameters SpawnInfo;
 			SpawnInfo.Owner = this;
 			SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
+			
 			//客户端上生成的武器种类应该与服务端的保持一致而不是被限定的
 			//调用角色在客户端上生成武器
 			if(ServerPrimaryWeapon->WeaponClient)
@@ -308,10 +330,31 @@ void AFPSBaseCharacter::ClientEquipFPArmsPrimary_Implementation()
 				UE_LOG(LogTemp, Warning, TEXT("Server Weapon Doesn't Set Client Weapon"));
 				return;
 			}
-			//附加武器模型到第一人称手臂上
-			ClientPrimaryWeapon->K2_AttachToComponent(FPSArmsMesh, TEXT("Weapon_Socket"), EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
-			ClientPrimaryWeapon->WeaponMesh->SetOnlyOwnerSee(true);
-			//手臂动画
+
+			//不同的武器使用不同的socket名字
+			//默认AK47插槽
+			FName WeaponSocketName = TEXT("WeaponSocket");
+			if (CurrentWeaponType == EWeaponType::AK47) WeaponSocketName = TEXT("WeaponSocket");
+			//M4A1插槽
+			if (CurrentWeaponType == EWeaponType::M4A1) WeaponSocketName = TEXT("M4A1_Socket");
+			//MP7插槽
+			if (CurrentWeaponType == EWeaponType::MP7) WeaponSocketName = TEXT("WeaponSocket");
+
+			if(ClientPrimaryWeapon)
+			{
+				//手臂动画混合
+				UpdateFPArmsBlendPose(ClientPrimaryWeapon->FPArmsBlendPose);
+				//附加武器模型到第一人称手臂上
+
+				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("%d %d %d"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
+
+				ClientPrimaryWeapon->K2_AttachToComponent(FPSArmsMesh, WeaponSocketName, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
+
+				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("%d %d %d"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
+
+				ClientPrimaryWeapon->WeaponMesh->SetOnlyOwnerSee(true);
+
+			}
 
 				//	更新子弹UI
 			if(FPSPlayerController)
@@ -336,11 +379,18 @@ AWeaponBaseClient* AFPSBaseCharacter::GetCurrentClientWeapon()
 	case EWeaponType::AK47 :
 		{
 		return ClientPrimaryWeapon;
-			
 		}
+	case EWeaponType::M4A1:
+	{
+		return ClientPrimaryWeapon;
+	}
+	case EWeaponType::MP7:
+	{
+		return ClientPrimaryWeapon;
+	}
 
 		default:
-			return nullptr;
+			return ClientPrimaryWeapon;
 	}
 
 }
@@ -350,6 +400,16 @@ AWeaponBaseServer* AFPSBaseCharacter::GetCurrentServerWeapon()
 	switch (CurrentWeaponType)
 	{
 	case EWeaponType::AK47:
+	{
+		return ServerPrimaryWeapon;
+
+	}
+	case EWeaponType::M4A1:
+	{
+		return ServerPrimaryWeapon;
+
+	}
+	case EWeaponType::MP7:
 	{
 		return ServerPrimaryWeapon;
 
@@ -391,6 +451,16 @@ void AFPSBaseCharacter::InputReload()
 			switch (CurrentWeaponType)
 			{
 			case EWeaponType::AK47:
+			{
+				ServerReloadPrimary();
+				break;
+			}
+			case EWeaponType::M4A1:
+			{
+				ServerReloadPrimary();
+				break;
+			}
+			case EWeaponType::MP7:
 			{
 				ServerReloadPrimary();
 				break;
@@ -503,6 +573,7 @@ void AFPSBaseCharacter::EquipPrimaryWeapon(AWeaponBaseServer* WeaponBaseServer)
 		//将自身模型，添加到插槽下，以跟随目标方式附加，这三个参数分别为位置旋转尺寸，最后一个是是否跟随被附加的物体进行模拟物理，即角色死的时候模拟物理的话枪械模型也跟着模拟物理
 		ServerPrimaryWeapon->K2_AttachToComponent(GetMesh(),TEXT("Weapon_Socket"),EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
 		ServerPrimaryWeapon->WeaponMesh->SetOwnerNoSee(true);
+		CurrentWeaponType = ServerPrimaryWeapon->KindOfWeapon;
 		//调用客户端装备主武器
 		ClientEquipFPArmsPrimary();
 	}
@@ -578,7 +649,7 @@ void AFPSBaseCharacter::AutoFire()
 void AFPSBaseCharacter::StartPrimaryFire()
 {
 	//判断子弹数量剩余
-	if(ServerPrimaryWeapon->ClipCurrentAmmo > 0 && !bIsReloading)
+	if(ServerPrimaryWeapon && ServerPrimaryWeapon->ClipCurrentAmmo > 0 && !bIsReloading)
 	{
 		
 		//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
@@ -788,36 +859,77 @@ void AFPSBaseCharacter::PurchaseWeapon(EWeaponType _WeaponType)
 {
 	FActorSpawnParameters SpawnInfo;
 	SpawnInfo.Owner = this;
-	SpawnInfo.SpawnCollisionHandlingOverride =ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	switch (_WeaponType)
 	{
-	case EWeaponType::AK47 :
+	case EWeaponType::AK47:
+	{
+		//如果身上有武器了自然就不执行
+		if (ServerPrimaryWeapon)
 		{
-			//如果身上有武器了自然就不执行
-			if(ServerPrimaryWeapon)
-			{
-				return;
-			}
-			else
-			{
-				//动态拿到AK47类
-				//路径结尾加个_C表示是类 不然拿不到
-					UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/AK47/BP_ServerAK47.BP_ServerAK47_C'") );
-
-				AWeaponBaseServer * ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
-	
-				//主动关闭碰撞
-				ServerWeapon->EquipWeapon();
-				//生成主武器
-				EquipPrimaryWeapon(ServerWeapon);
-		
-			}
-			break;
+			return;
 		}
-		default:
-			{
-			break;
-			}
+		else
+		{
+			//动态拿到AK47类
+			//路径结尾加个_C表示是类 不然拿不到
+			UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/AK47/BP_ServerAK47.BP_ServerAK47_C'"));
+			AWeaponBaseServer* ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
+			CurrentWeaponType = EWeaponType::AK47;
+			//主动关闭碰撞
+			ServerWeapon->EquipWeapon();
+			//生成主武器
+			EquipPrimaryWeapon(ServerWeapon);
+		
+		}
+		break;
+	}
+	case EWeaponType::M4A1:
+	{
+		//如果身上有武器了自然就不执行
+		if (ServerPrimaryWeapon)
+		{
+			return;
+		}
+		else
+		{
+			//动态拿到M4A1类
+			//路径结尾加个_C表示是类 不然拿不到
+			UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/M4A1/BP_ServerM4A1.BP_ServerM4A1_C'"));
+			AWeaponBaseServer* ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
+			//主动关闭碰撞
+			CurrentWeaponType = EWeaponType::M4A1;
+			ServerWeapon->EquipWeapon();
+			//生成主武器
+			EquipPrimaryWeapon(ServerWeapon);
+
+		}
+	}
+			case EWeaponType::MP7:
+				{
+					//如果身上有武器了自然就不执行
+					if (ServerPrimaryWeapon)
+						{
+							return;
+						}
+					else
+					{
+						//动态拿到M4A1类
+						//路径结尾加个_C表示是类 不然拿不到
+						UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/MP7/BP_ServerMP7.BP_ServerMP7_C'"));
+						AWeaponBaseServer* ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
+						//主动关闭碰撞
+						CurrentWeaponType = EWeaponType::MP7;
+						ServerWeapon->EquipWeapon();
+						//生成主武器
+						EquipPrimaryWeapon(ServerWeapon);
+
+					}
+			default:
+				{
+					break;
+				}
+				}
 	}
 }
 

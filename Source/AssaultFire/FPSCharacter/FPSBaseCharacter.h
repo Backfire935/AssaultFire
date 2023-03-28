@@ -104,7 +104,7 @@ private:
 	UPROPERTY(meta = (AllowPrivateAccess = " true"))
 		AWeaponBaseClient* ClientPrimaryWeapon;
 
-	UPROPERTY(EditAnywhere, meta = (AllowPrivateAccess = " true"))
+	UPROPERTY( meta = (AllowPrivateAccess = " true"),Replicated)
 	EWeaponType CurrentWeaponType;
 
 
@@ -266,6 +266,8 @@ public:
 	//角色装备武器,装备武器之前记得用EquipWeapon()关闭碰撞
 	void EquipPrimaryWeapon(AWeaponBaseServer* Weapon);
 
+	UFUNCTION(BlueprintImplementableEvent)
+		void UpdateFPArmsBlendPose(int NewBlendIPosendex);
 
 	//返回主武器
 	AWeaponBaseServer* GetServerPrimaryWeapon();

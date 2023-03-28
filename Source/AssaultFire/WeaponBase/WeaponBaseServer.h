@@ -13,6 +13,8 @@ UENUM()
 enum class EWeaponType :uint8
 {
 	AK47 UMETA(DisplayName = "AK47"),
+	M4A1 UMETA(DisplayName = "M4A1"),
+	MP7 UMETA(DisplayName = "MP7"),
 	DesertEagle UMETA(DisplayName = "DesertEagle"),
 
 };
