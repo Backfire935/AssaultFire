@@ -4,6 +4,7 @@
 #include "FPSBaseCharacter.h"
 #include "EnhancedInputSubsystems.h"
 #include "Components/DecalComponent.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -149,6 +150,11 @@ void AFPSBaseCharacter::FirePressed(const FInputActionValue& InputValue)
 			StartPrimaryFire();
 			break;
 		}
+		case EWeaponType::DesertEagle:
+		{
+			StartSecondaryFire();
+			break;
+		}
 		default:
 			break;
 		}
@@ -173,6 +179,11 @@ void AFPSBaseCharacter::FireReleased(const FInputActionValue& InputValue)
 	case EWeaponType::MP7:
 	{
 		StopPrimaryFire();
+		break;
+	}
+	case EWeaponType::DesertEagle:
+	{
+		StopSecondaryFire();
 		break;
 	}
 		default:
@@ -239,6 +250,44 @@ void AFPSBaseCharacter::ServerFireRifleWeapon_Implementation(FVector CameraLocat
 	RifleLineTrace(CameraLocation, CameraRotation, bIsMoving);
 }
 
+void AFPSBaseCharacter::ServerFirePistolWeapon_Implementation(FVector CameraLocation, FRotator CameraRotation,
+	bool bIsMoving)
+{
+
+	if (ServerSecondaryWeapon)
+	{
+		if(!ServerSecondaryWeapon->IsAutomatic)
+		{
+			FLatentActionInfo ActionInfo;
+			ActionInfo.CallbackTarget = this;
+			//在这里指定延迟后的回调函数
+			ActionInfo.ExecutionFunction = TEXT("DelaySpreedWeaponShootCallBack");
+			ActionInfo.UUID = FMath::Rand();
+			ActionInfo.Linkage = 0;
+			//C++中实现delay较为麻烦
+			UKismetSystemLibrary::Delay(this, ServerSecondaryWeapon->PistolSpreadRecoverZero, ActionInfo);
+
+		}
+
+		//多播NetMulticast
+		ServerSecondaryWeapon->MultiShootingEffect();
+
+		//开枪 减一发子弹
+		ServerSecondaryWeapon->ClipCurrentAmmo -= 1;
+
+		//多播 播放身体射击动画蒙太奇
+		MultiShooting();
+
+		//让客户端更新UI
+		ClientUpdateAmmoUI(ServerSecondaryWeapon->ClipCurrentAmmo, ServerSecondaryWeapon->GunCurrentAmmo);
+
+	}
+
+	bIsFiring = true;
+	PistolLineTrace(CameraLocation, CameraRotation, bIsMoving);
+
+}
+
 void AFPSBaseCharacter::ServerReloadPrimary_Implementation()
 {
 	if(ServerPrimaryWeapon)
@@ -273,6 +322,38 @@ void AFPSBaseCharacter::ServerReloadPrimary_Implementation()
 	
 }
 
+void AFPSBaseCharacter::ServerReloadSecondary_Implementation()
+{
+	if (ServerSecondaryWeapon)
+	{
+		//子弹不够或者满的都不换
+		if (ServerSecondaryWeapon->ClipCurrentAmmo < ServerSecondaryWeapon->MaxClipAmmo && ServerSecondaryWeapon->GunCurrentAmmo > 0)
+		{
+			//客户端手臂播放动画，
+			ClientReload();
+			//服务器多播身体动画，
+			MultiReloadAnimation();
+
+			bIsReloading = true;
+
+			//数据更新,UI更改
+			if (ClientSecondaryWeapon)
+			{
+				FLatentActionInfo ActionInfo;
+				ActionInfo.CallbackTarget = this;
+				//在这里指定延迟后的回调函数
+				ActionInfo.ExecutionFunction = TEXT("DelayPlayArmReloadCallBack");
+				ActionInfo.UUID = FMath::Rand();
+				ActionInfo.Linkage = 0;
+				//C++中实现delay较为麻烦
+				UKismetSystemLibrary::Delay(this, ClientSecondaryWeapon->ClientArmsReloadAnimMontage->GetPlayLength(), ActionInfo);
+			}
+
+		}
+
+	}
+}
+
 void AFPSBaseCharacter::ServerStopFire_Implementation()
 {
 	bIsFiring = false;
@@ -280,12 +361,15 @@ void AFPSBaseCharacter::ServerStopFire_Implementation()
 
 void AFPSBaseCharacter::MultiShooting_Implementation()
 {
+
 	if(TPSBodysAnimBP)
 	{
-		if(ServerPrimaryWeapon && ServerPrimaryWeapon->ServerTPSBodysShootAnimMontage)
-		{
-			TPSBodysAnimBP->Montage_Play(ServerPrimaryWeapon->ServerTPSBodysShootAnimMontage);
-		}
+		AWeaponBaseServer* CurrentServerWeapon = GetCurrentServerWeapon();
+				if (CurrentServerWeapon && CurrentServerWeapon->ServerTPSBodysShootAnimMontage)
+				{
+					TPSBodysAnimBP->Montage_Play(CurrentServerWeapon->ServerTPSBodysShootAnimMontage);
+				}
+		
 	}
 }
 
@@ -346,11 +430,13 @@ void AFPSBaseCharacter::ClientEquipFPArmsPrimary_Implementation()
 				UpdateFPArmsBlendPose(ClientPrimaryWeapon->FPArmsBlendPose);
 				//附加武器模型到第一人称手臂上
 
-				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("%d %d %d"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
+				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("Weapon Location %.0f %.0f %.0f"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
+
+				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("Socket Location %.0f %.0f %.0f"),FPSArmsMesh->GetSocketLocation(WeaponSocketName).X, FPSArmsMesh->GetSocketLocation(WeaponSocketName).Y, FPSArmsMesh->GetSocketLocation(WeaponSocketName).Z));
 
 				ClientPrimaryWeapon->K2_AttachToComponent(FPSArmsMesh, WeaponSocketName, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
 
-				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("%d %d %d"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
+				UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("Weapon Location %.0f %.0f %.0f"), ClientPrimaryWeapon->GetActorLocation().X, ClientPrimaryWeapon->GetActorLocation().Y, ClientPrimaryWeapon->GetActorLocation().Z));
 
 				ClientPrimaryWeapon->WeaponMesh->SetOnlyOwnerSee(true);
 
@@ -388,6 +474,10 @@ AWeaponBaseClient* AFPSBaseCharacter::GetCurrentClientWeapon()
 	{
 		return ClientPrimaryWeapon;
 	}
+	case EWeaponType::DesertEagle:
+	{
+		return ClientSecondaryWeapon;
+	}
 
 		default:
 			return ClientPrimaryWeapon;
@@ -402,17 +492,18 @@ AWeaponBaseServer* AFPSBaseCharacter::GetCurrentServerWeapon()
 	case EWeaponType::AK47:
 	{
 		return ServerPrimaryWeapon;
-
 	}
 	case EWeaponType::M4A1:
 	{
 		return ServerPrimaryWeapon;
-
 	}
 	case EWeaponType::MP7:
 	{
 		return ServerPrimaryWeapon;
-
+	}
+	case EWeaponType::DesertEagle:
+	{
+		return ServerSecondaryWeapon;
 	}
 
 	default:
@@ -465,6 +556,11 @@ void AFPSBaseCharacter::InputReload()
 				ServerReloadPrimary();
 				break;
 			}
+			case EWeaponType::DesertEagle:
+			{
+				ServerReloadSecondary();
+				break;
+			}
 			}
 		}
 		
@@ -492,9 +588,10 @@ void AFPSBaseCharacter::ClientUpdateHealthUI_Implementation(float NewHealth,floa
 
 void AFPSBaseCharacter::MultiSpawnBulletDecal_Implementation(FVector Location, FRotator Rotation)
 {
-	if(ServerPrimaryWeapon->BulletDecalMaterial)
+	AWeaponBaseServer *CurrentWeapon = GetCurrentServerWeapon();
+	if(CurrentWeapon->BulletDecalMaterial)
 	{
-		UDecalComponent * Decal =  UGameplayStatics::SpawnDecalAtLocation(GetWorld(), ServerPrimaryWeapon->BulletDecalMaterial,FVector(8,8,8),Location, Rotation , 10.f);
+		UDecalComponent * Decal =  UGameplayStatics::SpawnDecalAtLocation(GetWorld(), CurrentWeapon->BulletDecalMaterial,FVector(8,8,8),Location, Rotation , 10.f);
 		if(Decal)
 		{
 			//这个属性越小，越远能看见贴花
@@ -508,11 +605,12 @@ void AFPSBaseCharacter::ClientRecoil_Implementation()
 {
 	UCurveFloat* VerticalRecoilCurve = nullptr;
 	UCurveFloat* HorizontalRecoilCurve = nullptr;
-	if(ServerPrimaryWeapon)
+	AWeaponBaseServer* CurrentWeapon = GetCurrentServerWeapon();
+	if(CurrentWeapon)
 	{
 		//获取武器的后坐力表
-		VerticalRecoilCurve = ServerPrimaryWeapon->VerticalRecoilCurve;
-		HorizontalRecoilCurve = ServerPrimaryWeapon->HorizontalRecoilCurve;
+		VerticalRecoilCurve = CurrentWeapon->VerticalRecoilCurve;
+		HorizontalRecoilCurve = CurrentWeapon->HorizontalRecoilCurve;
 	}
 	//表的横坐标加0.1
 	RecoilXCoordPerShoot += 0.1;
@@ -559,6 +657,60 @@ void AFPSBaseCharacter::ClientReload_Implementation()
 	
 }
 
+void AFPSBaseCharacter::ClientEquipFPArmsSecondary_Implementation()
+{
+	if (ServerSecondaryWeapon)
+	{
+		if (ClientSecondaryWeapon)
+		{
+			//如果身上有武器了自然就不执行
+		}
+		else
+		{
+			FActorSpawnParameters SpawnInfo;
+			SpawnInfo.Owner = this;
+			SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+			//客户端上生成的武器种类应该与服务端的保持一致而不是被限定的
+			//调用角色在客户端上生成武器
+			if (ServerSecondaryWeapon->WeaponClient)
+			{
+				//如果已经被限定了就执行默认实现,比如开局指定某把武器
+				ClientSecondaryWeapon = GetWorld()->SpawnActor<AWeaponBaseClient>(ServerSecondaryWeapon->WeaponClient, GetActorTransform(), SpawnInfo);
+			}
+			//比如从地上
+			else
+			{
+				//不存在就return,防止编译器崩溃
+				UE_LOG(LogTemp, Warning, TEXT("Server Weapon Doesn't Set Client Weapon"));
+				return;
+			}
+
+			//不同的武器使用不同的socket名字
+			FName WeaponSocketName = TEXT("WeaponSocket");
+
+			if (ClientSecondaryWeapon)
+			{
+				//手臂动画混合
+				UpdateFPArmsBlendPose(ClientSecondaryWeapon->FPArmsBlendPose);
+				//附加武器模型到第一人称手臂上
+
+				ClientSecondaryWeapon->K2_AttachToComponent(FPSArmsMesh, WeaponSocketName, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
+
+				ClientSecondaryWeapon->WeaponMesh->SetOnlyOwnerSee(true);
+
+			}
+
+			//	更新子弹UI
+			if (FPSPlayerController)
+			{
+				FPSPlayerController->UpdateAmmoUI(ServerSecondaryWeapon->ClipCurrentAmmo, ServerSecondaryWeapon->GunCurrentAmmo);
+			}
+		}
+
+	}
+}
+
 void AFPSBaseCharacter::EquipPrimaryWeapon(AWeaponBaseServer* WeaponBaseServer)
 {
 	if(ServerPrimaryWeapon)
@@ -579,7 +731,27 @@ void AFPSBaseCharacter::EquipPrimaryWeapon(AWeaponBaseServer* WeaponBaseServer)
 	}
 }
 
+void AFPSBaseCharacter::EquipSecondaryWeapon(AWeaponBaseServer* Weapon)
+{
+	if (ServerSecondaryWeapon)
+	{
+		//如果身上有武器了自然就不执行
+		return;
+	}
+	else
+	{
+		ServerSecondaryWeapon = Weapon;
+		ServerSecondaryWeapon->SetOwner(this);
+		//将自身模型，添加到插槽下，以跟随目标方式附加，这三个参数分别为位置旋转尺寸，最后一个是是否跟随被附加的物体进行模拟物理，即角色死的时候模拟物理的话枪械模型也跟着模拟物理
+		ServerSecondaryWeapon->K2_AttachToComponent(GetMesh(), TEXT("Weapon_Socket"), EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, true);
+		ServerSecondaryWeapon->WeaponMesh->SetOwnerNoSee(true);
+		CurrentWeaponType = ServerSecondaryWeapon->KindOfWeapon;
+		//调用客户端装备副武器
+		//ClientEquipFPArmsPrimary();
+		ClientEquipFPArmsSecondary();
 
+	}
+}
 
 
 void AFPSBaseCharacter::ClientFire_Implementation()
@@ -617,7 +789,7 @@ void AFPSBaseCharacter::ClientFire_Implementation()
 	
 }
 
-void AFPSBaseCharacter::AutoFire()
+void AFPSBaseCharacter::RifleAutoFire()
 {
 	//判断子弹数量剩余
 	if (ServerPrimaryWeapon->ClipCurrentAmmo > 0)
@@ -646,6 +818,35 @@ void AFPSBaseCharacter::AutoFire()
 	}
 }
 
+void AFPSBaseCharacter::PistolAutoFire()
+{
+	//判断子弹数量剩余
+	if (ServerSecondaryWeapon->ClipCurrentAmmo > 0)
+	{
+		//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
+		if (UKismetMathLibrary::VSize(GetVelocity()) > 0.1f)
+		{
+			ServerFirePistolWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), true);
+		}
+		else
+		{
+			ServerFirePistolWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), false);
+		}
+		//客户端（枪体播放动画done，手臂播放动画done，播放射击声音done，屏幕抖动done，后坐力，枪口闪光粒子效果done，）
+		//创建十字准星done 播放十字准星done 开火时准星扩散 在beginplay添加，由控制器类在蓝图实现done
+		//创建子弹UI更新子弹UI 
+		ClientFire();
+
+		//客户端后坐力
+		//ClientRecoil();
+	}
+	else
+	{
+		StopSecondaryFire();
+		ServerReloadSecondary();
+	}
+}
+
 void AFPSBaseCharacter::StartPrimaryFire()
 {
 	//判断子弹数量剩余
@@ -669,7 +870,7 @@ void AFPSBaseCharacter::StartPrimaryFire()
 		//开启计时器 每隔固定时间重新射击
 		if(ServerPrimaryWeapon->IsAutomatic)
 		{
-			GetWorldTimerManager().SetTimer(AutoFireTimerHandle, this, &AFPSBaseCharacter::AutoFire, ServerPrimaryWeapon->AutoFireRate, true);
+			GetWorldTimerManager().SetTimer(AutoFireTimerHandle, this, &AFPSBaseCharacter::RifleAutoFire, ServerPrimaryWeapon->AutoFireRate, true);
 		}
 	
 		
@@ -749,33 +950,195 @@ void AFPSBaseCharacter::RifleLineTrace(FVector CameraLocation, FRotator CameraRo
 	}
 }
 
+void AFPSBaseCharacter::StartSecondaryFire()
+{
+	//判断子弹数量剩余
+	if (ServerSecondaryWeapon && ServerSecondaryWeapon->ClipCurrentAmmo > 0 && !bIsReloading)
+	{
+	
+			//服务端(播放射击声音, 枪口闪光粒子效果, 减少弹药，射线检测( 三种,步枪，手枪，狙击枪)，伤害应用，弹孔生成)
+			if (UKismetMathLibrary::VSize(GetVelocity()) > 0.1f)
+			{
+				ServerFirePistolWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), true);
+			}
+			else
+			{
+				ServerFirePistolWeapon(PlayerCamera->GetComponentLocation(), PlayerCamera->GetComponentRotation(), false);
+			}
+
+		//客户端（枪体播放动画done，手臂播放动画done，播放射击声音done，屏幕抖动done，后坐力，枪口闪光粒子效果done，）
+		//创建十字准星done 播放十字准星done 开火时准星扩散 在beginplay添加，由控制器类在蓝图实现done
+		//创建子弹UI更新子弹UI 
+		ClientFire();
+		//半自动全自动处理
+		//开启计时器 每隔固定时间重新射击
+		if (ServerSecondaryWeapon->IsAutomatic)
+		{
+			GetWorldTimerManager().SetTimer(AutoFireTimerHandle, this, &AFPSBaseCharacter::PistolAutoFire, ServerSecondaryWeapon->AutoFireRate, true);
+		}
+
+
+	}
+	else
+	{
+		if (!bIsReloading)
+		{
+			ServerReloadSecondary();
+		}
+	}
+}
+
+void AFPSBaseCharacter::StopSecondaryFire()
+{
+	//更改isFiring变量
+	ServerStopFire();
+	//关闭计时器，每隔固定时间重新计时
+	GetWorldTimerManager().ClearTimer(AutoFireTimerHandle);
+
+	//重置后坐力相关变量
+	ResetRecoil();
+}
+
+void AFPSBaseCharacter::PistolLineTrace(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving)
+{
+	FVector EndLocation;
+	FVector CameraForwardVector = UKismetMathLibrary::GetForwardVector(CameraRotation);
+	FHitResult HitResult;
+
+	//自己和队友 先把自己加进去
+	IgnoreArray.Add(this);
+
+	if (ServerSecondaryWeapon)
+	{
+
+		//是否移动导致不同的location检测
+		if (bIsMoving)
+		{
+			//连发手枪
+			if (ServerSecondaryWeapon->IsAutomatic)
+				{
+				//xyz全部加随机偏移
+				FVector Vector = CameraLocation + CameraForwardVector * ServerSecondaryWeapon->BulletDistance;
+				//跑打偏移范围
+				float RandomX = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+				float RandomY = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+				float RandomZ = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+				EndLocation = FVector(Vector.X + RandomX, Vector.Y + RandomY, Vector.Z + RandomZ);
+				}
+			//半自动手枪
+			else
+				{
+					//开启时加个摄像机旋转偏移,根据连续按鼠标的快慢决定，连续越快，偏移越大
+					FRotator Rotator;
+					Rotator.Roll = CameraRotation.Roll;
+					Rotator.Pitch = CameraRotation.Pitch + UKismetMathLibrary::RandomFloatInRange(ServerSecondaryWeapon->PistolSpreadMin, ServerSecondaryWeapon->PistolSpreadMax);
+					Rotator.Yaw = CameraRotation.Yaw + UKismetMathLibrary::RandomFloatInRange(ServerSecondaryWeapon->PistolSpreadMin, ServerSecondaryWeapon->PistolSpreadMax);
+					CameraForwardVector = UKismetMathLibrary::GetForwardVector(Rotator);
+
+					FVector  Vector =  CameraLocation + CameraForwardVector * ServerSecondaryWeapon->BulletDistance;
+
+					//跑打偏移范围
+					float RandomX = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+					float RandomY = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+					float RandomZ = UKismetMathLibrary::RandomFloatInRange(-ServerSecondaryWeapon->MovingFireRandomRange, ServerSecondaryWeapon->MovingFireRandomRange);
+
+				//连续射击偏移叠加跑打偏移
+					EndLocation = FVector(RandomX + Vector.X, RandomY + Vector.Y, RandomZ + Vector.Z);
+				}
+
+		}
+		else
+		{
+			//连发手枪
+			if (ServerSecondaryWeapon->IsAutomatic)
+			{
+				CameraForwardVector = UKismetMathLibrary::GetForwardVector(CameraRotation);
+				EndLocation = CameraLocation + CameraForwardVector * ServerSecondaryWeapon->BulletDistance;
+			}
+			//半自动手枪
+			else
+			{
+				//连续射击偏移
+				FRotator Rotator;
+				Rotator.Roll = CameraRotation.Roll;
+				Rotator.Pitch = CameraRotation.Pitch + UKismetMathLibrary::RandomFloatInRange(ServerSecondaryWeapon->PistolSpreadMin, ServerSecondaryWeapon->PistolSpreadMax);
+				Rotator.Yaw = CameraRotation.Yaw + UKismetMathLibrary::RandomFloatInRange(ServerSecondaryWeapon->PistolSpreadMin, ServerSecondaryWeapon->PistolSpreadMax);
+
+				CameraForwardVector = UKismetMathLibrary::GetForwardVector(Rotator);
+
+				EndLocation = CameraLocation + CameraForwardVector * ServerSecondaryWeapon->BulletDistance;
+			}
+		}
+	}
+
+	//返回是否命中
+	bool  HitSuccess = UKismetSystemLibrary::LineTraceSingle(GetWorld(), CameraLocation, EndLocation, ETraceTypeQuery::TraceTypeQuery1, false, IgnoreArray, EDrawDebugTrace::None, HitResult, true, FLinearColor::Blue, FLinearColor::Red, 10.F);
+
+	//连续射击的偏移量增加
+	ServerSecondaryWeapon->PistolSpreadMax += ServerSecondaryWeapon->PistolSpreadMaxIncrease;
+	ServerSecondaryWeapon->PistolSpreadMin -= ServerSecondaryWeapon->PistolSpreadMinIncrease;
+
+	if (HitSuccess)
+	{
+		UKismetSystemLibrary::PrintString(GetWorld(), FString::Printf(TEXT("Hit Actor Name : %s"), *HitResult.GetActor()->GetName()));
+		if (AFPSBaseCharacter* HittedCharacter = Cast<AFPSBaseCharacter>(HitResult.GetActor()))
+		{
+			if (ServerSecondaryWeapon)
+			{
+				//打到玩家，应用伤害
+				//这里可以做伤害加成,可以做个monster基类,也可以不在这里做伤害加成，而是在应用伤害的类里做伤害放大
+				DamagePlayer(HitResult.PhysMaterial.Get(), HitResult.GetActor(), ServerSecondaryWeapon->BaseDamage, CameraLocation, HitResult, GetController(), this);
+			}
+		}
+		else
+		{
+			//命中物体的法线向量
+			FRotator XRotator = UKismetMathLibrary::MakeRotFromX(HitResult.Normal);
+			//打到杂物 生成广播贴花
+			MultiSpawnBulletDecal(HitResult.Location, XRotator);
+		}
+	}
+}
+
+void AFPSBaseCharacter::DelaySpreedWeaponShootCallBack()
+{
+	ServerSecondaryWeapon->PistolSpreadMin = 0;
+	ServerSecondaryWeapon->PistolSpreadMax = 0;
+}
+
 void AFPSBaseCharacter::DelayPlayArmReloadCallBack()
 {
-	int32 _GunCurrentAmmo	=  ServerPrimaryWeapon->GunCurrentAmmo;//身上的子弹
-	int32 _ClipCurrentAmmo		=  ServerPrimaryWeapon->ClipCurrentAmmo;//弹夹还剩多少
-	int32 _MaxClipAmmo			=  ServerPrimaryWeapon->MaxClipAmmo;//弹夹容量
-
-	//是否装填全部子弹
-	if(_MaxClipAmmo - _ClipCurrentAmmo > _GunCurrentAmmo )//要装填的子弹>还剩下的子弹 说明身上的子弹不够填满弹夹了 此时全部子弹扔进去但还填不满弹夹
+	AWeaponBaseServer* CurrentWeapon = GetCurrentServerWeapon();
+	if(CurrentWeapon)
 	{
-		_ClipCurrentAmmo += _GunCurrentAmmo;
-		_GunCurrentAmmo -= _GunCurrentAmmo;
-	}
-	else//要装填的子弹<=还剩下的子弹 说明身上的子弹足够填满弹夹 此时把弹夹填满
-	{
-		//身上的子弹减掉消耗的部分
-		_GunCurrentAmmo -= _MaxClipAmmo - _ClipCurrentAmmo;
-		//弹夹填充要补充的子弹
-		_ClipCurrentAmmo = _MaxClipAmmo;
+		int32 _GunCurrentAmmo = CurrentWeapon->GunCurrentAmmo;//身上的子弹
+		int32 _ClipCurrentAmmo = CurrentWeapon->ClipCurrentAmmo;//弹夹还剩多少
+		int32 _MaxClipAmmo = CurrentWeapon->MaxClipAmmo;//弹夹容量
+
+		//是否装填全部子弹
+		if (_MaxClipAmmo - _ClipCurrentAmmo > _GunCurrentAmmo)//要装填的子弹>还剩下的子弹 说明身上的子弹不够填满弹夹了 此时全部子弹扔进去但还填不满弹夹
+		{
+			_ClipCurrentAmmo += _GunCurrentAmmo;
+			_GunCurrentAmmo -= _GunCurrentAmmo;
+		}
+		else//要装填的子弹<=还剩下的子弹 说明身上的子弹足够填满弹夹 此时把弹夹填满
+		{
+			//身上的子弹减掉消耗的部分
+			_GunCurrentAmmo -= _MaxClipAmmo - _ClipCurrentAmmo;
+			//弹夹填充要补充的子弹
+			_ClipCurrentAmmo = _MaxClipAmmo;
+		}
+
+		//变量设置回去
+		CurrentWeapon->GunCurrentAmmo = _GunCurrentAmmo;
+		CurrentWeapon->ClipCurrentAmmo = _ClipCurrentAmmo;
+		CurrentWeapon->MaxClipAmmo = _MaxClipAmmo;
+
+		ClientUpdateAmmoUI(_ClipCurrentAmmo, _GunCurrentAmmo);
+		bIsReloading = false;
 	}
 
-	//变量设置回去
-	ServerPrimaryWeapon->GunCurrentAmmo = _GunCurrentAmmo;
-	ServerPrimaryWeapon->ClipCurrentAmmo = _ClipCurrentAmmo;
-	ServerPrimaryWeapon->MaxClipAmmo = _MaxClipAmmo;
 
-	ClientUpdateAmmoUI(_ClipCurrentAmmo,_GunCurrentAmmo);
-	bIsReloading = false;
 }
 
 void AFPSBaseCharacter::DamagePlayer(UPhysicalMaterial* PhysicalMaterial ,AActor* DamagedActor, float BaseDamage, FVector const& HitFromDirection, FHitResult const& HitInfo, AController* EventInstigator, AActor* DamageCauser)
@@ -862,14 +1225,7 @@ void AFPSBaseCharacter::PurchaseWeapon(EWeaponType _WeaponType)
 	SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	switch (_WeaponType)
 	{
-	case EWeaponType::AK47:
-	{
-		//如果身上有武器了自然就不执行
-		if (ServerPrimaryWeapon)
-		{
-			return;
-		}
-		else
+		case EWeaponType::AK47:
 		{
 			//动态拿到AK47类
 			//路径结尾加个_C表示是类 不然拿不到
@@ -880,18 +1236,9 @@ void AFPSBaseCharacter::PurchaseWeapon(EWeaponType _WeaponType)
 			ServerWeapon->EquipWeapon();
 			//生成主武器
 			EquipPrimaryWeapon(ServerWeapon);
-		
-		}
 		break;
-	}
-	case EWeaponType::M4A1:
-	{
-		//如果身上有武器了自然就不执行
-		if (ServerPrimaryWeapon)
-		{
-			return;
 		}
-		else
+	case EWeaponType::M4A1:
 		{
 			//动态拿到M4A1类
 			//路径结尾加个_C表示是类 不然拿不到
@@ -902,20 +1249,10 @@ void AFPSBaseCharacter::PurchaseWeapon(EWeaponType _WeaponType)
 			ServerWeapon->EquipWeapon();
 			//生成主武器
 			EquipPrimaryWeapon(ServerWeapon);
-
 		}
-	}
 			case EWeaponType::MP7:
-				{
-					//如果身上有武器了自然就不执行
-					if (ServerPrimaryWeapon)
-						{
-							return;
-						}
-					else
-					{
-						//动态拿到M4A1类
-						//路径结尾加个_C表示是类 不然拿不到
+			{
+						//动态拿到MP7类
 						UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/MP7/BP_ServerMP7.BP_ServerMP7_C'"));
 						AWeaponBaseServer* ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
 						//主动关闭碰撞
@@ -923,12 +1260,22 @@ void AFPSBaseCharacter::PurchaseWeapon(EWeaponType _WeaponType)
 						ServerWeapon->EquipWeapon();
 						//生成主武器
 						EquipPrimaryWeapon(ServerWeapon);
+			}
 
-					}
+			case EWeaponType::DesertEagle:
+			{
+						//动态拿到DeseretEagle类
+						UClass* BlueprintVar = StaticLoadClass(AWeaponBaseServer::StaticClass(), nullptr, TEXT("/Script/Engine.Blueprint'/Game/Blueprints/Weapon/DesertEagle/BP_ServerDesertEagle.BP_ServerDesertEagle_C'"));
+						AWeaponBaseServer* ServerWeapon = GetWorld()->SpawnActor<AWeaponBaseServer>(BlueprintVar, GetActorTransform(), SpawnInfo);
+						//主动关闭碰撞
+						CurrentWeaponType = EWeaponType::DesertEagle;
+						ServerWeapon->EquipWeapon();
+						//生成主武器
+						EquipSecondaryWeapon(ServerWeapon);
+			}
 			default:
 				{
 					break;
-				}
 				}
 	}
 }

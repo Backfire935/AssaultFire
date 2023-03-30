@@ -61,8 +61,16 @@ void AWeaponBaseServer::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp
 			return;
 		}
 		EquipWeapon();
-		//装备武器
-		FPSCharacter->EquipPrimaryWeapon(this);
+
+		if(KindOfWeapon == EWeaponType::DesertEagle)
+		{
+			FPSCharacter->EquipSecondaryWeapon(this);
+		}
+		else
+		{
+			//装备武器
+			FPSCharacter->EquipPrimaryWeapon(this);
+		}
 	}
 
 }

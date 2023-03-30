@@ -116,20 +116,35 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Damage")
 		float BodyDamageRate = 1.f;
 
-	UPROPERTY(EditAnywhere, Category = "Weapon")
+	UPROPERTY(EditAnywhere, Category = "Auto Weapon")
 		bool IsAutomatic = true;//是否为全自动武器
 
-	UPROPERTY(EditAnywhere, Category = "Weapon")
+	UPROPERTY(EditAnywhere, Category = "Auto Weapon")
 		float AutoFireRate = 0.2;//自动射击频率
 
-	UPROPERTY(EditAnywhere, Category = "Weapon")
+	UPROPERTY(EditAnywhere, Category = "Auto Weapon")
 		UCurveFloat* VerticalRecoilCurve;//枪械的垂直后坐力表
 
-	UPROPERTY(EditAnywhere, Category = "Weapon")
+	UPROPERTY(EditAnywhere, Category = "Auto Weapon")
 		UCurveFloat* HorizontalRecoilCurve;//枪械的水平后坐力表
 
-	UPROPERTY(EditAnywhere, Category = "Weapon")
+	UPROPERTY(EditAnywhere, Category = "Auto Weapon && HalfAuto Weapon")
 		float MovingFireRandomRange = 300.f;//枪械的跑打随机后坐力偏移
+
+	UPROPERTY(EditAnywhere, Category = "HalfAuto Weapon")
+		float PistolSpreadMin = 0;//手枪单发散射最小值
+
+	UPROPERTY(EditAnywhere, Category = "HalfAuto Weapon")
+		float PistolSpreadMax = 0;//手枪单发散射最小值
+
+	UPROPERTY(EditAnywhere, Category = "HalfAuto Weapon")
+		float PistolSpreadRecoverZero = 0.5f;//手枪散射恢复平稳时间
+
+	UPROPERTY(EditAnywhere, Category = "HalfAuto Weapon")
+		float PistolSpreadMaxIncrease = 0.5f;//手枪向右向上随机扩散增量
+
+	UPROPERTY(EditAnywhere, Category = "HalfAuto Weapon")
+		float PistolSpreadMinIncrease = 0.5f;//手枪向左向下随机扩散增量
 };
 
 

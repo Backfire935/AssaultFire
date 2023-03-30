@@ -99,10 +99,17 @@ private:
 	UPROPERTY(meta = (AllowPrivateAccess = " true"))
 		AWeaponBaseServer* ServerPrimaryWeapon;
 
+	//第三人称副武器的指针
+	UPROPERTY(meta = (AllowPrivateAccess = " true"))
+		AWeaponBaseServer* ServerSecondaryWeapon;
 
 	//第一人称主武器的指针
 	UPROPERTY(meta = (AllowPrivateAccess = " true"))
 		AWeaponBaseClient* ClientPrimaryWeapon;
+
+	//第一人称副武器的指针
+	UPROPERTY(meta = (AllowPrivateAccess = " true"))
+		AWeaponBaseClient* ClientSecondaryWeapon;
 
 	UPROPERTY( meta = (AllowPrivateAccess = " true"),Replicated)
 	EWeaponType CurrentWeaponType;
@@ -214,13 +221,21 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerNormalSpeedWalk();
 
-	//服务端开火
+	//服务端步枪开火
 	UFUNCTION(Server, Reliable)
 		void ServerFireRifleWeapon(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
+
+	//服务端副武器开火
+	UFUNCTION(Server, Reliable)
+		void ServerFirePistolWeapon(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
 
 	//服务端换弹
 	UFUNCTION(Server, Reliable)
 		void ServerReloadPrimary();
+
+	//服务端换弹
+	UFUNCTION(Server, Reliable)
+		void ServerReloadSecondary();
 
 	//服务端停止射击
 	UFUNCTION(Server, Reliable)
@@ -242,6 +257,9 @@ public:
 	UFUNCTION(Client, Reliable)
 		void ClientEquipFPArmsPrimary();
 
+	//客户端生成副武器
+	UFUNCTION(Client, Reliable)
+		void 	ClientEquipFPArmsSecondary();
 
 	//客户端开火
 		UFUNCTION(Client, Reliable)
@@ -266,6 +284,9 @@ public:
 	//角色装备武器,装备武器之前记得用EquipWeapon()关闭碰撞
 	void EquipPrimaryWeapon(AWeaponBaseServer* Weapon);
 
+	//角色装备副武器,装备武器之前记得用EquipWeapon()关闭碰撞
+	void EquipSecondaryWeapon(AWeaponBaseServer* Weapon);
+
 	UFUNCTION(BlueprintImplementableEvent)
 		void UpdateFPArmsBlendPose(int NewBlendIPosendex);
 
@@ -277,12 +298,20 @@ public:
 	FTimerHandle AutoFireTimerHandle;
 
 
-	void AutoFire();
+	void RifleAutoFire();
+	void PistolAutoFire();
 	//步枪的射击相关
 	void StartPrimaryFire();
 	void StopPrimaryFire();
 	//步枪射线检测
 	void RifleLineTrace(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
+
+	//手枪的射击相关
+	void StartSecondaryFire();
+	void StopSecondaryFire();
+	//手枪有两套射击检测方法，一套自动的一套半自动的
+	void PistolLineTrace(FVector CameraLocation, FRotator CameraRotation, bool bIsMoving);
+	void DelaySpreedWeaponShootCallBack();
 
 	//是否正在开火
 	UPROPERTY(Replicated)
@@ -306,6 +335,12 @@ public:
 		void OnHit(AActor* DamagedActor, float Damage, class AController* InstigatedBy, FVector HitLocation, class UPrimitiveComponent* FHitComponent, FName BoneName, FVector ShotFromDirection, const class UDamageType* DamageType, AActor* DamageCauser);
 
 };
+
+
+
+
+
+
 
 
 
